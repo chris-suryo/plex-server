@@ -1,0 +1,229 @@
+# Home media server: Plex + automatic downloads (*arr stack)
+#
+# Core apps always run. Optional groups are switched on with COMPOSE_PROFILES in .env:
+#   usenet  -> SABnzbd
+#   torrent -> Gluetun (VPN) + qBittorrent + Unpackerr
+#   public  -> Cloudflare Tunnel (exposes Seerr ONLY, so friends can log in)
+#
+# Folder layout follows TRaSH Guides: every app sees the same /data tree so
+# imports are instant hardlinks/moves instead of slow copies.
+#   ${DATA_ROOT}   -> /data   (big HDD: downloads + media library)
+#   ${CONFIG_ROOT} -> /config (SSD: app settings and databases)
+
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-env: &env
+  PUID: ${PUID:-1000}
+  PGID: ${PGID:-1000}
+  UMASK: ${UMASK:-002}
+  TZ: ${TZ:-Etc/UTC}
+
+services:
+  # ---------------------------------------------------------------- core ----
+
+  plex:
+    <<: *common
+    image: lscr.io/linuxserver/plex:latest
+    container_name: plex
+    # Host networking keeps LAN discovery and Plex Remote Access simple.
+    network_mode: host
+    devices:
+      # Intel Quick Sync (UHD 630). Hardware transcoding needs Plex Pass.
+      - /dev/dri:/dev/dri
+    environment:
+      <<: *env
+      VERSION: docker
+      PLEX_CLAIM: ${PLEX_CLAIM:-}
+    volumes:
+      - ${CONFIG_ROOT:-/docker/appdata}/plex:/config
+      - ${DATA_ROOT:-/data}/media:/data/media
+
+  seerr:
+    <<: *common
+    image: ghcr.io/seerr-team/seerr:latest
+    container_name: seerr
+    # Seerr runs as UID 1000 and ignores PUID/PGID; bootstrap.sh chowns its folder.
+    init: true
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      LOG_LEVEL: info
+    volumes:
+      - ${CONFIG_ROOT:-/docker/appdata}/seerr:/app/config
+    ports:
+      - 5055:5055
+
+  sonarr:
+    <<: *common
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    environment: *env
+    volumes:
+      - ${CONFIG_ROOT:-/docker/appdata}/sonarr:/config
+      - ${DATA_ROOT:-/data}:/data
+    ports:
+      - 8989:8989
+
+  radarr:
+    <<: *common
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    environment: *env
+    volumes:
+      - ${CONFIG_ROOT:-/docker/appdata}/radarr:/config
+      - ${DATA_ROOT:-/data}:/data
+    ports:
+      - 7878:7878
+
+  prowlarr:
+    <<: *common
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment: *env
+    volumes:
+      - ${CONFIG_ROOT:-/docker/appdata}/prowlarr:/config
+    ports:
+      - 9696:9696
+
+  bazarr:
+    <<: *common
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    environment: *env
+    volumes:
+      - ${CONFIG_ROOT:-/docker/appdata}/bazarr:/config
+      - ${DATA_ROOT:-/data}/media:/data/media
+    ports:
+      - 6767:6767
+
+  tautulli:
+    <<: *common
+    image: lscr.io/linuxserver/tautulli:latest
+    container_name: tautulli
+    environment: *env
+    volumes:
+      - ${CONFIG_ROOT:-/docker/appdata}/tautulli:/config
+    ports:
+      - 8181:8181
+
+  recyclarr:
+    <<: *common
+    # Recyclarr no longer publishes :latest; track the major version.
+    image: ghcr.io/recyclarr/recyclarr:8
+    container_name: recyclarr
+    user: ${PUID:-1000}:${PGID:-1000}
+    depends_on: [sonarr, radarr]
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      SONARR_API_KEY: ${SONARR_API_KEY:-}
+      RADARR_API_KEY: ${RADARR_API_KEY:-}
+    volumes:
+      - ${CONFIG_ROOT:-/docker/appdata}/recyclarr:/config
+      - ./recyclarr/recyclarr.yml:/config/recyclarr.yml:ro
+
+  # ------------------------------------------------------ profile: usenet ----
+
+  sabnzbd:
+    <<: *common
+    image: lscr.io/linuxserver/sabnzbd:latest
+    container_name: sabnzbd
+    profiles: [usenet]
+    # Makes "sabnzbd" a whitelisted hostname so Sonarr/Radarr can connect by name.
+    hostname: sabnzbd
+    environment: *env
+    volumes:
+      - ${CONFIG_ROOT:-/docker/appdata}/sabnzbd:/config
+      - ${DATA_ROOT:-/data}/usenet:/data/usenet
+    ports:
+      # 8080 is taken by qBittorrent, so the SABnzbd UI lives on 8085.
+      - 8085:8080
+
+  # ----------------------------------------------------- profile: torrent ----
+
+  gluetun:
+    <<: *common
+    image: qmcgaw/gluetun:v3
+    container_name: gluetun
+    profiles: [torrent]
+    cap_add: [NET_ADMIN]
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      VPN_SERVICE_PROVIDER: ${VPN_SERVICE_PROVIDER:-}
+      VPN_TYPE: ${VPN_TYPE:-}
+      WIREGUARD_PRIVATE_KEY: ${WIREGUARD_PRIVATE_KEY:-}
+      WIREGUARD_PRESHARED_KEY: ${WIREGUARD_PRESHARED_KEY:-}
+      WIREGUARD_ADDRESSES: ${WIREGUARD_ADDRESSES:-}
+      OPENVPN_USER: ${OPENVPN_USER:-}
+      OPENVPN_PASSWORD: ${OPENVPN_PASSWORD:-}
+      SERVER_COUNTRIES: ${SERVER_COUNTRIES:-}
+      VPN_PORT_FORWARDING: ${VPN_PORT_FORWARDING:-}
+      PORT_FORWARD_ONLY: ${PORT_FORWARD_ONLY:-}
+      FIREWALL_VPN_INPUT_PORTS: ${FIREWALL_VPN_INPUT_PORTS:-}
+      # Push the VPN's forwarded port into qBittorrent automatically (from the Gluetun wiki).
+      # Requires qBittorrent's "Bypass authentication for clients on localhost".
+      VPN_PORT_FORWARDING_UP_COMMAND: >-
+        /bin/sh -c 'wget -O- -nv --retry-connrefused --post-data
+        "json={\"listen_port\":{{PORT}},\"current_network_interface\":\"{{VPN_INTERFACE}}\",\"random_port\":false,\"upnp\":false}"
+        http://127.0.0.1:8080/api/v2/app/setPreferences'
+      VPN_PORT_FORWARDING_DOWN_COMMAND: >-
+        /bin/sh -c 'wget -O- -nv --retry-connrefused --post-data
+        "json={\"listen_port\":0,\"current_network_interface\":\"lo\"}"
+        http://127.0.0.1:8080/api/v2/app/setPreferences'
+    volumes:
+      - ${CONFIG_ROOT:-/docker/appdata}/gluetun:/gluetun
+    ports:
+      # qBittorrent shares Gluetun's network, so its Web UI is published here.
+      - 8080:8080
+
+  qbittorrent:
+    <<: *common
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    profiles: [torrent]
+    # All qBittorrent traffic goes through the VPN. If the VPN drops, it has no network (kill switch).
+    network_mode: service:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      <<: *env
+      WEBUI_PORT: 8080
+    volumes:
+      - ${CONFIG_ROOT:-/docker/appdata}/qbittorrent:/config
+      - ${DATA_ROOT:-/data}/torrents:/data/torrents
+
+  unpackerr:
+    <<: *common
+    image: golift/unpackerr:latest
+    container_name: unpackerr
+    profiles: [torrent]
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      UN_SONARR_0_URL: http://sonarr:8989
+      UN_SONARR_0_API_KEY: ${SONARR_API_KEY:-}
+      UN_SONARR_0_PATHS_0: /data/torrents/tv
+      UN_RADARR_0_URL: http://radarr:7878
+      UN_RADARR_0_API_KEY: ${RADARR_API_KEY:-}
+      UN_RADARR_0_PATHS_0: /data/torrents/movies
+    volumes:
+      - ${DATA_ROOT:-/data}/torrents:/data/torrents
+
+  # ------------------------------------------------------ profile: public ----
+
+  cloudflared:
+    <<: *common
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    profiles: [public]
+    command: tunnel --no-autoupdate run
+    environment:
+      # Route ONLY Seerr (http://seerr:5055) through the tunnel. Never Plex or the *arr apps.
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}

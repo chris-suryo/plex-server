@@ -1,0 +1,6 @@
+# Secrets and machine-specific settings
+.env
+
+# Local backups, if written inside the repo
+backups/
+*.tar.gz

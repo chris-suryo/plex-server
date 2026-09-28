@@ -1,18 +1,18 @@
-# 4. Start and connect the apps
+# 2. Start and connect the apps
 
-Replace `SERVER_IP` below with the server's LAN IP. Apps reach each other **by name** (`sonarr`, `radarr`, `sabnzbd`, `gluetun`), except for Plex, which uses host networking and is reached at `SERVER_IP:32400`.
+URLs below use `mediabox.local` (at home). Over Tailscale, use `http://mediabox:<port>`. Apps reach each other **by name** (`sonarr`, `radarr`, `sabnzbd`, `gluetun`). Plex runs from the homelab repo on the host network, so it's always `192.168.77.20:32400`.
 
 | App | URL | What it does |
 |---|---|---|
-| Plex | `http://SERVER_IP:32400/web` | Streams your library |
-| Seerr | `http://SERVER_IP:5055` | Search and request movies and shows; Plex Watchlist auto-requests |
-| Sonarr | `http://SERVER_IP:8989` | TV: finds, downloads, renames and imports episodes |
-| Radarr | `http://SERVER_IP:7878` | Movies: same job |
-| Prowlarr | `http://SERVER_IP:9696` | Manages indexers (search sources) for Sonarr/Radarr |
-| Bazarr | `http://SERVER_IP:6767` | Subtitles |
-| Tautulli | `http://SERVER_IP:8181` | Plex stats and history |
-| SABnzbd | `http://SERVER_IP:8085` | Usenet downloader (`usenet` profile) |
-| qBittorrent | `http://SERVER_IP:8080` | Torrent downloader behind the VPN (`torrent` profile) |
+| Plex *(homelab)* | `http://mediabox.local:32400/web` | Streams your library |
+| Seerr | `http://mediabox.local:5055` | Search and request movies and shows; Plex Watchlist auto-requests |
+| Sonarr | `http://mediabox.local:8989` | TV: finds, downloads, renames and imports episodes |
+| Radarr | `http://mediabox.local:7878` | Movies: same job |
+| Prowlarr | `http://mediabox.local:9696` | Manages indexers (search sources) for Sonarr/Radarr |
+| Bazarr | `http://mediabox.local:6767` | Subtitles |
+| Tautulli | `http://mediabox.local:8181` | Plex stats and history |
+| SABnzbd | `http://mediabox.local:8085` | Usenet downloader (`usenet` profile) |
+| qBittorrent | `http://mediabox.local:8080` | Torrent downloader behind the VPN (`torrent` profile) |
 
 ---
 
@@ -46,39 +46,33 @@ Details for each provider: https://github.com/qdm12/gluetun-wiki/tree/main/setup
 
 ```bash
 cd ~/plex-server
-nano .env                # set PLEX_CLAIM from https://www.plex.tv/claim (valid 4 minutes!)
+nano .env                # COMPOSE_PROFILES, plus VPN details if using torrents
 docker compose up -d
 docker compose ps        # everything should be "running" (gluetun "healthy")
 ```
-
-Missed the 4-minute claim window? No problem: open `http://SERVER_IP:32400/web` from a PC on your home network and sign in there.
 
 **Set a login on every app** the first time you open it. Sonarr, Radarr, Prowlarr and Bazarr ask for this on first visit: choose *Forms (Login Page)*.
 
 ---
 
-## Step 2: Plex
+## Step 2: Plex (homelab repo)
 
-1. Open `http://SERVER_IP:32400/web` and sign in. Give the server a name.
-2. **Add libraries**:
-   - *Movies* → folder `/data/media/movies`
-   - *TV Shows* → folder `/data/media/tv`
-3. **Settings → Library**: ✅ *Scan my library automatically*, ✅ *Run a partial scan when changes are detected*.
-4. **Settings → Transcoder** (needs Plex Pass): ✅ *Use hardware acceleration when available*, ✅ *Use hardware-accelerated video encoding*, ✅ *Enable HDR tone mapping*.
-5. Remote access and sharing with friends: [05-remote-access.md](05-remote-access.md).
+Plex is installed and configured by the homelab repo: [docs/08-mediabox-apps.md §4](https://github.com/chris-suryo/pi-hole-ad-blocker/blob/HEAD/docs/08-mediabox-apps.md). That covers libraries, Quick Sync, Remote Access and sharing with friends. Check it's running at `http://mediabox.local:32400/web`.
+
+Inside the Plex container, the libraries are `/media/movies` and `/media/tv`, the same folders Sonarr/Radarr see as `/data/media/...`. That difference is expected. Plex notices new files on its own; there's nothing to configure here.
 
 ---
 
 ## Step 3a: SABnzbd (`usenet` profile)
 
-1. Open `http://SERVER_IP:8085`. The wizard asks for your Usenet provider: host, port `563`, ✅ SSL, username, password, connections. Test, then finish.
+1. Open `http://mediabox.local:8085`. The wizard asks for your Usenet provider: host, port `563`, ✅ SSL, username, password, connections. Test, then finish.
 2. **Config → Folders**:
    - Temporary Download Folder: `/data/usenet/incomplete`
    - Completed Download Folder: `/data/usenet/complete`
 3. **Config → Categories**: add `movies` (folder `movies`) and `tv` (folder `tv`).
 4. **Config → General**: set a username and password, and copy the **API Key** for Step 4.
 
-If you ever see *"Access denied – Hostname verification failed"*, add the hostname you used (e.g. `mediaserver`) under **Config → Special → host_whitelist**.
+If you ever see *"Access denied – Hostname verification failed"*, add the hostname you used (e.g. `mediabox`) under **Config → Special → host_whitelist**.
 
 ## Step 3b: qBittorrent (`torrent` profile)
 
@@ -91,7 +85,7 @@ If you ever see *"Access denied – Hostname verification failed"*, add the host
    ```bash
    docker compose logs qbittorrent | grep -i password
    ```
-3. Open `http://SERVER_IP:8080`, log in as `admin`, then go to **Tools → Options**:
+3. Open `http://mediabox.local:8080`, log in as `admin`, then go to **Tools → Options**:
    - **Web UI**: set a new password. ✅ *Bypass authentication for clients on localhost*. Gluetun needs this to push the forwarded port in.
    - **Downloads**: *Default Torrent Management Mode* = `Automatic`. *Default Save Path* = `/data/torrents`.
    - **Connection**: ❌ untick *Use UPnP / NAT-PMP port forwarding from my router*. The VPN handles the port.
@@ -136,7 +130,7 @@ You now have TRaSH Guides profiles: **WEB-1080p** in Sonarr and **HD Bluray + WE
 
 ## Step 6: Prowlarr (indexers)
 
-1. Open `http://SERVER_IP:9696`. Go to **Indexers → Add Indexer**, search for yours, and enter its API key or login.
+1. Open `http://mediabox.local:9696`. Go to **Indexers → Add Indexer**, search for yours, and enter its API key or login.
 2. **Settings → Apps → +**, add **Sonarr**:
    - Prowlarr Server: `http://prowlarr:9696`
    - Sonarr Server: `http://sonarr:8989`
@@ -150,8 +144,8 @@ If an indexer sits behind Cloudflare and fails, you may need **FlareSolverr** or
 
 ## Step 7: Seerr (requests)
 
-1. Open `http://SERVER_IP:5055`, choose **Plex**, and sign in with your Plex account.
-2. **Plex server**: pick yours from the list, or enter `SERVER_IP`, port `32400`. **Sync libraries** and enable Movies and TV. Don't use `localhost`: Plex runs on the host network.
+1. Open `http://mediabox.local:5055`, choose **Plex**, and sign in with your Plex account.
+2. **Plex server**: pick yours from the list, or enter `192.168.77.20`, port `32400`. **Sync libraries** and enable Movies and TV. Don't use `localhost`: Plex runs on the host network.
 3. **Services**:
    - **Radarr**:
      - Server settings: ✅ Default Server, Hostname `radarr`, Port `7878`, API Key.
@@ -171,7 +165,7 @@ If an indexer sits behind Cloudflare and fails, you may need **FlareSolverr** or
   - **Languages**: add a profile, e.g. English
   - **Providers**: add a couple, e.g. OpenSubtitles.com with a free account
   - Text subtitles (SRT) avoid the heavy "burn-in" transcodes that image subtitles cause.
-- **Tautulli** (`:8181`): sign in with Plex and point it at `SERVER_IP:32400`.
+- **Tautulli** (`:8181`): sign in with Plex and point it at `192.168.77.20:32400`.
 
 ---
 
@@ -186,29 +180,18 @@ If an indexer sits behind Cloudflare and fails, you may need **FlareSolverr** or
    - It appears in Plex
 3. Torrents only: check that the import was a hardlink, not a copy:
    ```bash
-   stat -c '%h %n' /data/media/movies/*/*.mkv    # "2" = hardlinked
+   stat -c '%h %n' /srv/storage/data/media/movies/*/*.mkv    # "2" = hardlinked
    ```
-
-## Step 10: Check hardware transcoding (Plex Pass)
-
-Play something in the Plex app and set the quality to something low, e.g. *720p 2 Mbps*. Plex **Dashboard** should show **Transcode (hw)**. Live view of the iGPU at work:
-
-```bash
-sudo intel_gpu_top
-```
-
----
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| Plex won't start: *error gathering device information … /dev/dri* | The iGPU is disabled. Fix the BIOS setting ([01-hardware.md](01-hardware.md)) and check `ls /dev/dri`. |
-| *Access denied* / import failed / Plex can't see files | Permissions. Re-run `./scripts/bootstrap.sh`; it resets ownership. Check `PUID`/`PGID` in `.env` match `id -u` / `id -g`. |
+| *Access denied* / import failed / Plex can't see new files | Permissions. Re-run `./scripts/bootstrap.sh`; it resets ownership. Check `PUID`/`PGID` in `.env` match `id -u` / `id -g`. |
 | Sonarr/Radarr can't reach qBittorrent | Use host `gluetun`, not `qbittorrent`. Check `docker compose ps` shows gluetun *healthy*. |
 | qBittorrent has no connectivity after Gluetun restarted | `docker compose restart qbittorrent` (it shares Gluetun's network, so it needs to reconnect). |
-| Downloads are **copied** and use double the space | Don't add extra volume mounts. All apps must see the same `/data` paths. |
-| Seerr: *Unable to connect to Plex* | Use `SERVER_IP`, not `localhost`/`plex`. |
+| Downloads are **copied** and use double the space | `torrents/` and `media/` must be on one filesystem/ZFS dataset (re-run `bootstrap.sh`; it tests this). Don't add extra volume mounts. |
+| Seerr: *Unable to connect to Plex* | Use `192.168.77.20`, not `localhost`/`plex`. Check Plex is up (homelab). |
 | Nothing ever downloads | Check Prowlarr has working indexers and has synced them to both apps. In Sonarr/Radarr, check **Activity → Queue**, **System → Status** and the logs. |
 
 Useful commands:
@@ -220,4 +203,4 @@ docker compose restart radarr        # restart one app
 docker compose up -d                 # apply .env / compose.yaml changes
 ```
 
-Next: [05-remote-access.md](05-remote-access.md)
+Next: [03-friends-access.md](03-friends-access.md)

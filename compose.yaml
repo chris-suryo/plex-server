@@ -1,4 +1,8 @@
-# Home media server: Plex + automatic downloads (*arr stack)
+# Media automation for the homelab media PC ("mediabox"): requests + automatic downloads.
+#
+# Runs ON TOP of the homelab repo (github.com/chris-suryo/pi-hole-ad-blocker), which owns
+# the machine itself, Docker, Tailscale, backups and Plex/Jellyfin. This stack only puts
+# new movies and shows into the media folder those servers read.
 #
 # Core apps always run. Optional groups are switched on with COMPOSE_PROFILES in .env:
 #   usenet  -> SABnzbd
@@ -7,8 +11,8 @@
 #
 # Folder layout follows TRaSH Guides: every app sees the same /data tree so
 # imports are instant hardlinks/moves instead of slow copies.
-#   ${DATA_ROOT}   -> /data   (big HDD: downloads + media library)
-#   ${CONFIG_ROOT} -> /config (SSD: app settings and databases)
+#   ${DATA_ROOT}   -> /data   (/srv/storage/data: downloads + media, ONE filesystem)
+#   ${CONFIG_ROOT} -> /config (/srv/appdata: app settings on the SSD, backed up by homelab)
 
 x-common: &common
   restart: unless-stopped
@@ -27,23 +31,6 @@ x-env: &env
 services:
   # ---------------------------------------------------------------- core ----
 
-  plex:
-    <<: *common
-    image: lscr.io/linuxserver/plex:latest
-    container_name: plex
-    # Host networking keeps LAN discovery and Plex Remote Access simple.
-    network_mode: host
-    devices:
-      # Intel Quick Sync (UHD 630). Hardware transcoding needs Plex Pass.
-      - /dev/dri:/dev/dri
-    environment:
-      <<: *env
-      VERSION: docker
-      PLEX_CLAIM: ${PLEX_CLAIM:-}
-    volumes:
-      - ${CONFIG_ROOT:-/docker/appdata}/plex:/config
-      - ${DATA_ROOT:-/data}/media:/data/media
-
   seerr:
     <<: *common
     image: ghcr.io/seerr-team/seerr:latest
@@ -54,7 +41,7 @@ services:
       TZ: ${TZ:-Etc/UTC}
       LOG_LEVEL: info
     volumes:
-      - ${CONFIG_ROOT:-/docker/appdata}/seerr:/app/config
+      - ${CONFIG_ROOT:-/srv/appdata}/seerr:/app/config
     ports:
       - 5055:5055
 
@@ -64,8 +51,8 @@ services:
     container_name: sonarr
     environment: *env
     volumes:
-      - ${CONFIG_ROOT:-/docker/appdata}/sonarr:/config
-      - ${DATA_ROOT:-/data}:/data
+      - ${CONFIG_ROOT:-/srv/appdata}/sonarr:/config
+      - ${DATA_ROOT:-/srv/storage/data}:/data
     ports:
       - 8989:8989
 
@@ -75,8 +62,8 @@ services:
     container_name: radarr
     environment: *env
     volumes:
-      - ${CONFIG_ROOT:-/docker/appdata}/radarr:/config
-      - ${DATA_ROOT:-/data}:/data
+      - ${CONFIG_ROOT:-/srv/appdata}/radarr:/config
+      - ${DATA_ROOT:-/srv/storage/data}:/data
     ports:
       - 7878:7878
 
@@ -86,7 +73,7 @@ services:
     container_name: prowlarr
     environment: *env
     volumes:
-      - ${CONFIG_ROOT:-/docker/appdata}/prowlarr:/config
+      - ${CONFIG_ROOT:-/srv/appdata}/prowlarr:/config
     ports:
       - 9696:9696
 
@@ -96,18 +83,19 @@ services:
     container_name: bazarr
     environment: *env
     volumes:
-      - ${CONFIG_ROOT:-/docker/appdata}/bazarr:/config
-      - ${DATA_ROOT:-/data}/media:/data/media
+      - ${CONFIG_ROOT:-/srv/appdata}/bazarr:/config
+      - ${DATA_ROOT:-/srv/storage/data}/media:/data/media
     ports:
       - 6767:6767
 
   tautulli:
     <<: *common
+    # Plex stats. Plex itself runs from the homelab repo at mediabox:32400.
     image: lscr.io/linuxserver/tautulli:latest
     container_name: tautulli
     environment: *env
     volumes:
-      - ${CONFIG_ROOT:-/docker/appdata}/tautulli:/config
+      - ${CONFIG_ROOT:-/srv/appdata}/tautulli:/config
     ports:
       - 8181:8181
 
@@ -123,7 +111,7 @@ services:
       SONARR_API_KEY: ${SONARR_API_KEY:-}
       RADARR_API_KEY: ${RADARR_API_KEY:-}
     volumes:
-      - ${CONFIG_ROOT:-/docker/appdata}/recyclarr:/config
+      - ${CONFIG_ROOT:-/srv/appdata}/recyclarr:/config
       - ./recyclarr/recyclarr.yml:/config/recyclarr.yml:ro
 
   # ------------------------------------------------------ profile: usenet ----
@@ -137,8 +125,8 @@ services:
     hostname: sabnzbd
     environment: *env
     volumes:
-      - ${CONFIG_ROOT:-/docker/appdata}/sabnzbd:/config
-      - ${DATA_ROOT:-/data}/usenet:/data/usenet
+      - ${CONFIG_ROOT:-/srv/appdata}/sabnzbd:/config
+      - ${DATA_ROOT:-/srv/storage/data}/usenet:/data/usenet
     ports:
       # 8080 is taken by qBittorrent, so the SABnzbd UI lives on 8085.
       - 8085:8080
@@ -177,7 +165,7 @@ services:
         "json={\"listen_port\":0,\"current_network_interface\":\"lo\"}"
         http://127.0.0.1:8080/api/v2/app/setPreferences'
     volumes:
-      - ${CONFIG_ROOT:-/docker/appdata}/gluetun:/gluetun
+      - ${CONFIG_ROOT:-/srv/appdata}/gluetun:/gluetun
     ports:
       # qBittorrent shares Gluetun's network, so its Web UI is published here.
       - 8080:8080
@@ -196,8 +184,8 @@ services:
       <<: *env
       WEBUI_PORT: 8080
     volumes:
-      - ${CONFIG_ROOT:-/docker/appdata}/qbittorrent:/config
-      - ${DATA_ROOT:-/data}/torrents:/data/torrents
+      - ${CONFIG_ROOT:-/srv/appdata}/qbittorrent:/config
+      - ${DATA_ROOT:-/srv/storage/data}/torrents:/data/torrents
 
   unpackerr:
     <<: *common
@@ -214,7 +202,7 @@ services:
       UN_RADARR_0_API_KEY: ${RADARR_API_KEY:-}
       UN_RADARR_0_PATHS_0: /data/torrents/movies
     volumes:
-      - ${DATA_ROOT:-/data}/torrents:/data/torrents
+      - ${DATA_ROOT:-/srv/storage/data}/torrents:/data/torrents
 
   # ------------------------------------------------------ profile: public ----
 

@@ -22,7 +22,7 @@ Both repos rely on these, so change them in both places or not at all.
 | User | Your normal user, `PUID`/`PGID` = `1000` |
 | App settings | `/srv/appdata/<app>` on the boot SSD (backed up by homelab) |
 | Media + downloads | **`/srv/storage/data`**, with `media/` inside it. homelab's Plex/Jellyfin read `/srv/storage/data/media` (`MEDIA_DIR`). |
-| Ports on `mediabox` | homelab: Plex 32400, Jellyfin 8096, Immich 2283. This repo: 5055, 8989, 7878, 9696, 6767, 8181, 8085, 8080. |
+| Ports on `mediabox` | This repo: 5055, 8989, 7878, 9696, 6767, 8181, 8085, 8080. The full map, the source of truth for both repos, is homelab [docs/08-mediabox-apps.md §9](https://github.com/chris-suryo/pi-hole-ad-blocker/blob/HEAD/docs/08-mediabox-apps.md#9-port-map-shared-with-plex-server). Check it before adding a service. |
 
 ### Why `/srv/storage/data` must be one filesystem
 
